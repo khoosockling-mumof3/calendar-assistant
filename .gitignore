@@ -1,0 +1,14 @@
+credentials.json
+credentials.desktop-original.json
+token.json
+launcher.log
+__pycache__/
+uploads/
+drafts/
+.venv/
+build/
+dist/
+*.spec
+*.zip
+*.exe
+Tesseract-OCR/
