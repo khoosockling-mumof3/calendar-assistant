@@ -2,3 +2,5 @@ python-dateutil
 pdfplumber
 pypdf
 Pillow
+openpyxl
+python-docx

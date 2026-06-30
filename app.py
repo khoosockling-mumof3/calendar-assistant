@@ -1,5 +1,6 @@
 import cgi
 import base64
+import csv
 import datetime as dt
 import hashlib
 import json
@@ -35,6 +36,23 @@ try:
 except Exception:
     date_parser = None
 
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
+
+try:
+    import docx
+except Exception:
+    docx = None
+
+try:
+    from PIL import Image, ImageFilter, ImageOps
+except Exception:
+    Image = None
+    ImageFilter = None
+    ImageOps = None
+
 
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 USER_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -49,6 +67,9 @@ PORT = int(os.environ.get("CALENDAR_ASSISTANT_PORT", "7871"))
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 PDF_EXTENSIONS = {".pdf"}
+EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+CSV_EXTENSIONS = {".csv"}
+WORD_EXTENSIONS = {".docx"}
 MONTH_NAMES = [
     "January",
     "February",
@@ -87,7 +108,10 @@ DATE_PATTERNS = [
     re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"),
     re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b"),
 ]
-WEEKDAY_PATTERN = re.compile(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\b", re.IGNORECASE)
+WEEKDAY_PATTERN = re.compile(
+    r"\b(?:Mon(?:day)?|Tue(?:sday)?|Tues|Wed(?:nesday)?|Thu(?:rsday)?|Thur|Thurs|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\.?\b",
+    re.IGNORECASE,
+)
 EVENT_WORDS = re.compile(
     r"\b(?:holiday|closure|closed|training|event|meeting|appointment|practice|club|concert|class|camp|"
     r"orientation|conference|cancelled|canceled|rescheduled|postponed)\b",
@@ -166,6 +190,161 @@ def read_pdf_text(path):
     return "\n".join(parts).strip()
 
 
+def cell_to_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, dt.datetime):
+        return value.strftime("%d %B %Y %H:%M")
+    if isinstance(value, dt.date):
+        return value.strftime("%d %B %Y")
+    if isinstance(value, dt.time):
+        return value.strftime("%H:%M")
+    return normalize_spaces(str(value))
+
+
+def row_to_text(headers, values):
+    cells = []
+    for index, value in enumerate(values):
+        text = cell_to_text(value)
+        if not text:
+            continue
+        header = normalize_spaces(headers[index]) if index < len(headers) else ""
+        if header and not re.match(r"^column\s+\d+$", header, re.IGNORECASE):
+            cells.append(f"{header}: {text}")
+        else:
+            cells.append(text)
+    return " | ".join(cells)
+
+
+def parse_labeled_fields(text):
+    fields = {}
+    for part in re.split(r"\s*\|\s*|\n+", text or ""):
+        match = re.match(r"^\s*([^:]{1,80}):\s*(.*?)\s*$", part)
+        if not match:
+            continue
+        key = normalize_spaces(match.group(1)).lower()
+        value = normalize_spaces(match.group(2))
+        if value:
+            fields[key] = value
+    return fields
+
+
+def first_labeled_value(fields, names):
+    for name in names:
+        wanted = name.lower()
+        for key, value in fields.items():
+            if key == wanted or wanted in key:
+                return value
+    return ""
+
+
+def time_window_from_label(value):
+    lower = normalize_spaces(value).lower()
+    if not lower:
+        return "", ""
+    windows = [
+        (("early morning",), ("7:00 am", "9:00 am")),
+        (("morning", "am"), ("9:00 am", "12:00 pm")),
+        (("afternoon", "pm"), ("1:00 pm", "5:00 pm")),
+        (("evening", "eve"), ("6:00 pm", "9:00 pm")),
+        (("night",), ("8:00 pm", "10:00 pm")),
+        (("day", "all day", "within park hours"), ("9:00 am", "5:00 pm")),
+    ]
+    for labels, window in windows:
+        if any(label == lower or label in lower for label in labels):
+            return window
+    return "", ""
+
+
+def labeled_time_value(fields, fallback_text):
+    value = first_labeled_value(fields, ["start time", "start", "time"])
+    if value:
+        if re.search(r"\d", value):
+            times = extract_times(value)
+            if times[0]:
+                return times
+        label_window = time_window_from_label(value)
+    else:
+        label_window = ("", "")
+    for label in ["opening hours", "hours", "notes", "remarks", "description"]:
+        value = first_labeled_value(fields, [label])
+        if value:
+            times = extract_times(value)
+            if times[0]:
+                return times
+    if label_window[0]:
+        return label_window
+    if fields:
+        return "", ""
+    return extract_times(fallback_text)
+
+
+def read_excel_text(path):
+    if not openpyxl:
+        return "", "Excel reading is not available in this build. Review the fields manually."
+    try:
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception as exc:
+        return "", f"Excel file could not be read: {exc}"
+
+    parts = []
+    sheet_names = list(workbook.sheetnames)
+    try:
+        for sheet in workbook.worksheets:
+            rows = list(sheet.iter_rows(values_only=True))
+            if not rows:
+                continue
+            headers = [cell_to_text(value) or f"Column {index + 1}" for index, value in enumerate(rows[0])]
+            data_rows = rows[1:] if len(rows) > 1 else rows
+            for row in data_rows:
+                text = row_to_text(headers, row)
+                if text:
+                    parts.append(f"Worksheet: {sheet.title} | {text}")
+    finally:
+        workbook.close()
+    note = f"Excel file: scanned all {len(sheet_names)} worksheet(s): {', '.join(sheet_names)}."
+    return "\n".join(parts).strip(), note
+
+
+def read_csv_text(path):
+    encodings = ["utf-8-sig", "utf-8", "cp1252"]
+    rows = []
+    last_error = ""
+    for encoding in encodings:
+        try:
+            with path.open("r", encoding=encoding, newline="") as handle:
+                rows = list(csv.reader(handle))
+            break
+        except Exception as exc:
+            last_error = str(exc)
+    if not rows:
+        return "", f"CSV file could not be read: {last_error or 'No rows found.'}"
+    headers = [cell_to_text(value) or f"Column {index + 1}" for index, value in enumerate(rows[0])]
+    parts = []
+    data_rows = rows[1:] if len(rows) > 1 else rows
+    for row in data_rows:
+        text = row_to_text(headers, row)
+        if text:
+            parts.append(text)
+    return "\n".join(parts).strip(), ""
+
+
+def read_word_text(path):
+    if not docx:
+        return "", "Word reading is not available in this build. Review the fields manually."
+    try:
+        document = docx.Document(path)
+    except Exception as exc:
+        return "", f"Word file could not be read: {exc}"
+    parts = [normalize_spaces(paragraph.text) for paragraph in document.paragraphs if normalize_spaces(paragraph.text)]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [normalize_spaces(cell.text) for cell in row.cells if normalize_spaces(cell.text)]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n".join(parts).strip(), ""
+
+
 def find_tesseract():
     common_paths = [
         USER_DIR / "Tesseract-OCR" / "tesseract.exe",
@@ -182,6 +361,63 @@ def find_tesseract():
     return ""
 
 
+def ocr_quality_score(text):
+    clean = normalize_spaces(text)
+    if not clean:
+        return 0
+    alpha = len(re.findall(r"[A-Za-z0-9]", clean))
+    event_hits = len(EVENT_WORDS.findall(clean))
+    date_hits = sum(len(pattern.findall(clean)) for pattern in DATE_PATTERNS)
+    try:
+        chunks = split_event_chunks(text)
+    except Exception:
+        chunks = []
+    chunk_count = len(chunks)
+    average_chunk_length = (sum(len(chunk) for chunk in chunks) / chunk_count) if chunk_count else 0
+    score = alpha + (event_hits * 25) + (date_hits * 80)
+    if 2 <= chunk_count <= 25:
+        score += 250
+    if chunk_count > 25:
+        score -= chunk_count * 180
+    if chunk_count:
+        dated_chunks = sum(1 for chunk in chunks if has_date(chunk))
+        if dated_chunks / chunk_count < 0.45:
+            score -= chunk_count * 120
+    if chunk_count and average_chunk_length < 25:
+        score -= 250
+    return score
+
+
+def make_ocr_preprocessed_image(path):
+    if not Image:
+        return None
+    try:
+        image = Image.open(path)
+        image = ImageOps.exif_transpose(image).convert("L")
+        width, height = image.size
+        scale = 2 if max(width, height) < 1800 else 1
+        if scale > 1:
+            image = image.resize((width * scale, height * scale))
+        image = ImageOps.autocontrast(image)
+        image = image.filter(ImageFilter.SHARPEN)
+        image = image.point(lambda pixel: 255 if pixel > 175 else 0)
+        target = path.with_name(f"{path.stem}-ocr-preprocessed.png")
+        image.save(target)
+        return target
+    except Exception:
+        return None
+
+
+def run_tesseract(tesseract, path, env, psm="6"):
+    return subprocess.run(
+        [tesseract, str(path), "stdout", "-l", "eng", "--oem", "1", "--psm", psm],
+        capture_output=True,
+        timeout=90,
+        check=False,
+        env=env,
+    )
+
+
 def read_image_text(path):
     tesseract = find_tesseract()
     if not tesseract:
@@ -190,21 +426,42 @@ def read_image_text(path):
     tessdata = Path(tesseract).resolve().parent / "tessdata"
     if tessdata.exists():
         env["TESSDATA_PREFIX"] = str(tessdata)
+    attempts = []
+    temp_path = None
     try:
-        result = subprocess.run(
-            [tesseract, str(path), "stdout", "-l", "eng"],
-            capture_output=True,
-            timeout=60,
-            check=False,
-            env=env,
-        )
+        for candidate, psm in [(path, "6"), (path, "11")]:
+            try:
+                attempts.append(run_tesseract(tesseract, candidate, env, psm))
+            except Exception:
+                continue
+        temp_path = make_ocr_preprocessed_image(path)
+        if temp_path:
+            for psm in ["6", "11"]:
+                try:
+                    attempts.append(run_tesseract(tesseract, temp_path, env, psm))
+                except Exception:
+                    continue
     except Exception as exc:
         return "", f"Image OCR could not run: {exc}"
-    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
-    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
-    if result.returncode != 0:
-        return "", normalize_spaces(stderr) or "Image OCR did not return readable text."
-    return stdout.strip(), ""
+    finally:
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+    best_text = ""
+    errors = []
+    for result in attempts:
+        stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+        if result.returncode != 0 and stderr:
+            errors.append(normalize_spaces(stderr))
+        if ocr_quality_score(stdout) > ocr_quality_score(best_text):
+            best_text = stdout
+    if not best_text.strip():
+        return "", errors[0] if errors else "Image OCR did not return readable text."
+    return best_text.strip(), ""
 
 
 def classify_change_type(text):
@@ -243,11 +500,14 @@ def clean_time_match(match):
     ampm = (match.group("ampm") or "").replace(".", "").lower()
     compact = match.group("compact")
     if compact:
-        if not ampm:
+        if not ampm and len(compact) != 4:
             return ""
         hour = compact[:-2]
         minute = compact[-2:]
-        return f"{int(hour)}:{minute} {ampm}".strip()
+        hour_value = int(hour)
+        if hour_value > 23:
+            return ""
+        return f"{hour_value}:{minute} {ampm}".strip()
     hour = match.group("hour") or match.group("hour_only")
     minute = match.group("minute") or ""
     if match.group("hour_only") and not ampm:
@@ -261,9 +521,21 @@ def clean_time_match(match):
 
 
 def extract_times(text):
+    text = normalize_spaces(text)
+    explicit = re.search(
+        r"\b(?:dep(?:art(?:ure)?)?|depart|from|start)\s*[:\-]?\s*"
+        r"(?P<first>\d{1,2}[:.]\d{2}\s*(?:a\.?m\.?|p\.?m\.?|am|pm)?)"
+        r".{0,30}?\b(?:arr(?:ive|ival)?|to|end)\s*[:\-]?\s*"
+        r"(?P<second>\d{1,2}[:.]\d{2}\s*(?:a\.?m\.?|p\.?m\.?|am|pm)?)",
+        text,
+        re.IGNORECASE,
+    )
+    if explicit:
+        return parse_single_time(explicit.group("first")), parse_single_time(explicit.group("second"))
+
     ranges = re.finditer(
         r"(?P<first>(?:\d{1,2}[:.]\d{2}|\d{3,4}|\d{1,2})\s*(?:a\.?m\.?|p\.?m\.?|am|pm)?)\s*"
-        r"(?:-|to|until|through)\s*"
+        r"(?:-|–|—|to|until|through)\s*"
         r"(?P<second>(?:\d{1,2}[:.]\d{2}|\d{3,4}|\d{1,2})\s*(?:a\.?m\.?|p\.?m\.?|am|pm)?)",
         text,
         re.IGNORECASE,
@@ -328,7 +600,7 @@ def clean_event_title(candidate, text):
     title = re.sub(r"[^\w\s()&/.,:'+-]", " ", title, flags=re.UNICODE)
     title = normalize_spaces(title)
     title = re.sub(r"\b(?:Gazetted|Public|Holiday)\b", " ", title, flags=re.IGNORECASE)
-    title = re.sub(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\b", " ", title, flags=re.IGNORECASE)
+    title = WEEKDAY_PATTERN.sub(" ", title)
     for pattern in DATE_PATTERNS:
         title = pattern.sub(" ", title)
     title = normalize_spaces(title.strip(" :-*,?"))
@@ -406,16 +678,19 @@ def split_event_chunks(text):
 
 
 def build_event(filename, text, note="", sequence=None, context_year=""):
-    start_time, end_time = extract_times(text)
-    date_value = normalize_ocr_date_text(extract_date(text))
+    fields = parse_labeled_fields(text)
+    start_time, end_time = labeled_time_value(fields, text)
+    date_value = normalize_ocr_date_text(first_labeled_value(fields, ["date", "day/date"]) or extract_date(text))
     if date_value and context_year and not date_has_year(date_value):
         date_value = f"{date_value} {context_year}"
+    title_value = first_labeled_value(fields, ["activity", "event", "title", "subject", "summary"])
+    location_value = first_labeled_value(fields, ["location / attraction", "location", "venue", "place", "address"])
     event = {
-        "title": extract_title(text, filename),
+        "title": clean_event_title(title_value, text) if title_value else extract_title(text, filename),
         "date": date_value,
         "start_time": start_time,
         "end_time": end_time,
-        "location": extract_location(text),
+        "location": location_value or extract_location(text),
         "description": summarize_description(text),
         "change_type": classify_change_type(text),
         "source_file": filename,
@@ -448,12 +723,18 @@ def process_file(path, original_name):
             note = "No selectable PDF text was found. If this is a scanned PDF, review the fields manually."
     elif ext in IMAGE_EXTENSIONS:
         text, note = read_image_text(path)
+    elif ext in EXCEL_EXTENSIONS:
+        text, note = read_excel_text(path)
+    elif ext in CSV_EXTENSIONS:
+        text, note = read_csv_text(path)
+    elif ext in WORD_EXTENSIONS:
+        text, note = read_word_text(path)
     else:
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             text = ""
-        note = "This file type is not a PDF or image, so extraction may be limited."
+        note = "This file type is not a PDF, image, Excel, CSV, or Word file, so extraction may be limited."
     chunks = split_event_chunks(text)
     if len(chunks) > 1:
         split_note = f"{len(chunks)} possible events were found in this file. Please review each one."

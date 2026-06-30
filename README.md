@@ -1,6 +1,6 @@
 # Calendar Assistant
 
-Calendar Assistant is a local Windows app for reviewing PDFs, screenshots, and images, extracting likely calendar events, checking Google Calendar for duplicates, and syncing reviewed events to Google Calendar.
+Calendar Assistant is a local Windows app for reviewing PDFs, screenshots, images, Excel/CSV files, and Word documents, extracting likely calendar events, checking Google Calendar for duplicates, and syncing reviewed events to Google Calendar.
 
 The app runs locally on the user's computer. It does not include the author's Google credentials or personal tokens.
 
@@ -45,7 +45,7 @@ Google Calendar scope used:
 
 ## Features
 
-- Upload PDFs, screenshots, and images.
+- Upload PDFs, screenshots, images, Excel/CSV files, and Word documents.
 - Extract likely event title, date, start time, end time, location, description, and event type.
 - Split multi-event tables into separate review cards.
 - Search Google Calendar for similar events in a chosen date range.

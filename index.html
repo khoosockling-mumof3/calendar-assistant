@@ -11,7 +11,13 @@
     <section class="top-bar">
       <div>
         <h1>Calendar Assistant</h1>
-        <p>Extract calendar events from PDFs, screenshots, and images, review the details, check for duplicates, and sync approved events to Google Calendar.</p>
+        <p class="top-summary">Upload PDFs, screenshots, images, Excel/CSV files, or Word documents to extract draft calendar events for review.</p>
+        <ol class="top-steps">
+          <li><strong>Choose files</strong> to add documents. Excel workbooks are scanned across all worksheets.</li>
+          <li><strong>Review Files</strong> extracts possible events into editable draft cards.</li>
+          <li><strong>Search Google Calendar for Duplicates</strong> checks similar events in the date range you choose.</li>
+          <li><strong>Save Edited Draft</strong> saves JSON and syncs the approved events to Google Calendar.</li>
+        </ol>
       </div>
       <button id="refreshDrafts" type="button">Refresh Drafts</button>
     </section>
@@ -36,8 +42,8 @@
       <form id="uploadForm">
         <label class="drop-zone" for="fileInput">
           <span class="drop-title">Choose files</span>
-          <span class="drop-help">PDFs, screenshots, and images can be selected together.</span>
-          <input id="fileInput" name="files" type="file" multiple accept=".pdf,image/*">
+          <span class="drop-help">PDFs, screenshots, images, Excel, CSV, and Word files can be selected together. Excel workbooks are scanned across all worksheets.</span>
+          <input id="fileInput" name="files" type="file" multiple accept=".pdf,image/*,.xlsx,.xlsm,.csv,.docx">
         </label>
         <button id="uploadButton" type="submit">Review Files</button>
       </form>
