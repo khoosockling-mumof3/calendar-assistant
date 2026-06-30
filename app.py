@@ -483,6 +483,27 @@ def extract_date(text):
     return ""
 
 
+def extract_reschedule_target(text):
+    match = re.search(
+        r"\bto\s+(?P<date>(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
+        r"\d{1,2}(?:st|nd|rd|th)?\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?(?:,?\s+\d{4})?)"
+        r"(?:\s+at\s+(?P<time>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm)))?",
+        text or "",
+        re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r"\bto\s+(?P<date>(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?)"
+            r"(?:\s+at\s+(?P<time>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm)))?",
+            text or "",
+            re.IGNORECASE,
+        )
+    if not match:
+        return "", ""
+    return normalize_ocr_date_text(match.group("date")), parse_single_time(match.group("time") or "")
+
+
 def extract_context_year(text):
     match = re.search(r"\b(20\d{2}|19\d{2})\b", text or "")
     return match.group(1) if match else ""
@@ -500,6 +521,8 @@ def clean_time_match(match):
     ampm = (match.group("ampm") or "").replace(".", "").lower()
     compact = match.group("compact")
     if compact:
+        if not ampm and re.match(r"^(?:19|20)\d{2}$", compact):
+            return ""
         if not ampm and len(compact) != 4:
             return ""
         hour = compact[:-2]
@@ -648,6 +671,30 @@ def split_event_chunks(text):
     if not lines:
         return []
 
+    labeled_date_indexes = [
+        idx for idx, line in enumerate(lines)
+        if re.match(r"^\s*(?:date|when|day/date)\s*:", line, re.IGNORECASE) and has_date(line)
+    ]
+    if labeled_date_indexes:
+        chunks = []
+        consumed_until = -1
+        for pos, date_idx in enumerate(labeled_date_indexes):
+            start = date_idx
+            if date_idx > 0 and not re.match(r"^\s*(?:date|time|start|end|location|where|venue|notes?|remarks?|description)\s*:", lines[date_idx - 1], re.IGNORECASE):
+                start = date_idx - 1
+            end = date_idx + 1
+            while end < len(lines) and re.match(r"^\s*(?:time|start|end|location|where|venue|notes?|remarks?|description)\s*:", lines[end], re.IGNORECASE):
+                end += 1
+            chunk = "\n".join(lines[start:end])
+            if chunk:
+                chunks.append(chunk)
+                consumed_until = max(consumed_until, end)
+        tail = "\n".join(lines[consumed_until:])
+        if tail and has_date(tail) and EVENT_WORDS.search(tail):
+            chunks.append(tail)
+        if chunks:
+            return chunks
+
     row_chunks = []
     for line in lines:
         lower = line.lower()
@@ -681,18 +728,27 @@ def build_event(filename, text, note="", sequence=None, context_year=""):
     fields = parse_labeled_fields(text)
     start_time, end_time = labeled_time_value(fields, text)
     date_value = normalize_ocr_date_text(first_labeled_value(fields, ["date", "day/date"]) or extract_date(text))
+    change_type = classify_change_type(text)
+    if change_type == "reschedule":
+        target_date, target_time = extract_reschedule_target(text)
+        if target_date:
+            date_value = target_date
+        if target_time:
+            start_time = target_time
+            end_time = ""
     if date_value and context_year and not date_has_year(date_value):
         date_value = f"{date_value} {context_year}"
     title_value = first_labeled_value(fields, ["activity", "event", "title", "subject", "summary"])
     location_value = first_labeled_value(fields, ["location / attraction", "location", "venue", "place", "address"])
+    description_value = first_labeled_value(fields, ["description", "notes", "remarks", "comment", "comments"])
     event = {
         "title": clean_event_title(title_value, text) if title_value else extract_title(text, filename),
         "date": date_value,
         "start_time": start_time,
         "end_time": end_time,
         "location": location_value or extract_location(text),
-        "description": summarize_description(text),
-        "change_type": classify_change_type(text),
+        "description": description_value or summarize_description(text),
+        "change_type": change_type,
         "source_file": filename,
         "google_calendar_id": "primary",
         "google_event_id": "",
