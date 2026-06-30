@@ -49,6 +49,20 @@ PORT = int(os.environ.get("CALENDAR_ASSISTANT_PORT", "7871"))
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 PDF_EXTENSIONS = {".pdf"}
+MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
 
 TIME_PATTERN = re.compile(
     r"\b(?:(?P<hour>\d{1,2})(?P<sep>[:.])(?P<minute>\d{2})|(?P<compact>\d{3,4})|(?P<hour_only>\d{1,2}))\s*"
@@ -93,6 +107,25 @@ def safe_filename(name):
 
 def normalize_spaces(value):
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def normalize_ocr_date_text(value):
+    text = normalize_spaces(value)
+    if not text:
+        return ""
+
+    def replace_month(match):
+        word = match.group(0)
+        lower = word.lower().rstrip(".")
+        if len(lower) < 3:
+            return word
+        for month in MONTH_NAMES:
+            month_lower = month.lower()
+            if month_lower.startswith(lower) or lower.startswith(month_lower[:3]):
+                return month
+        return word
+
+    return re.sub(r"\b[A-Za-z]{3,12}\.?\b", replace_month, text)
 
 
 def read_pdf_text(path):
@@ -320,7 +353,7 @@ def split_event_chunks(text):
 
 def build_event(filename, text, note="", sequence=None, context_year=""):
     start_time, end_time = extract_times(text)
-    date_value = extract_date(text)
+    date_value = normalize_ocr_date_text(extract_date(text))
     if date_value and context_year and not date_has_year(date_value):
         date_value = f"{date_value} {context_year}"
     event = {
@@ -378,7 +411,7 @@ def process_file(path, original_name):
 def parse_event_datetime(event):
     if not date_parser:
         raise ValueError("Date parsing is not available in this Python environment.")
-    date_text = normalize_spaces(event.get("date", ""))
+    date_text = normalize_ocr_date_text(event.get("date", ""))
     if not date_text:
         raise ValueError("Missing date.")
     default = dt.datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
@@ -751,7 +784,12 @@ def sync_events_to_google_calendar(events):
             event["google_sync_status"] = "skipped cancellation without google_event_id"
             results.append({"title": event.get("title"), "status": event["google_sync_status"]})
             continue
-        body = event_to_google_body(event)
+        try:
+            body = event_to_google_body(event)
+        except Exception as exc:
+            event["google_sync_status"] = f"skipped invalid date/time: {exc}"
+            results.append({"title": event.get("title"), "status": event["google_sync_status"]})
+            continue
         if event.get("change_type") == "cancellation" and event_id:
             body["status"] = "cancelled"
         encoded_calendar = quote(calendar_id, safe="")
