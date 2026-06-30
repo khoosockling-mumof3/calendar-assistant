@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendar Assistant</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="top-bar">
+      <div>
+        <h1>Calendar Assistant</h1>
+        <p>Review PDFs, screenshots, and images, then save draft calendar events as JSON.</p>
+      </div>
+      <button id="refreshDrafts" type="button">Refresh Drafts</button>
+    </section>
+
+    <section class="upload-panel">
+      <div class="setup-panel">
+        <div>
+          <h2>Google Setup</h2>
+          <p id="setupStatus">Checking Google setup...</p>
+        </div>
+        <form id="setupForm" class="setup-form">
+          <input id="credentialsInput" name="credentials" type="file" accept=".json,application/json">
+          <button type="submit">Save Google Credentials</button>
+          <button id="signOutGoogle" type="button">Clear Google Sign-In</button>
+        </form>
+      </div>
+      <form id="uploadForm">
+        <label class="drop-zone" for="fileInput">
+          <span class="drop-title">Choose files</span>
+          <span class="drop-help">PDFs, screenshots, and images can be selected together.</span>
+          <input id="fileInput" name="files" type="file" multiple accept=".pdf,image/*">
+        </label>
+        <button id="uploadButton" type="submit">Review Files</button>
+      </form>
+      <p id="status" class="status" role="status"></p>
+      <div id="calendarStatus" class="calendar-status empty-status">
+        <h2>Google Calendar Status</h2>
+        <p>No Google Calendar updates yet.</p>
+      </div>
+    </section>
+
+    <section class="review-layout">
+      <div class="review-header">
+        <h2>Draft Events</h2>
+        <button id="saveDraft" type="button" disabled>Save Edited Draft</button>
+      </div>
+      <div class="duplicate-tools">
+        <label>
+          Search from
+          <input id="duplicateStart" type="date">
+        </label>
+        <label>
+          Search to
+          <input id="duplicateEnd" type="date">
+        </label>
+        <button id="searchDuplicates" type="button" disabled>Search Google Calendar for Duplicates</button>
+      </div>
+      <div id="events" class="events empty-state">Upload files to create draft event details for review.</div>
+    </section>
+
+    <section class="drafts-panel">
+      <h2>Saved JSON Drafts</h2>
+      <div id="drafts" class="draft-list"></div>
+    </section>
+  </main>
+  <script src="/assets/app.js?v=20260630-shareable-setup"></script>
+</body>
+</html>
