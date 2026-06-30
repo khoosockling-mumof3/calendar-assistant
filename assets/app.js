@@ -15,6 +15,7 @@ const setupStatusEl = document.querySelector("#setupStatus");
 const signOutGoogleButton = document.querySelector("#signOutGoogle");
 
 let currentEvents = [];
+const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:7871" : "";
 
 const fields = [
   ["title", "Title", "input"],
@@ -34,6 +35,21 @@ function setStatus(message, tone = "") {
   statusEl.className = `status ${tone}`.trim();
 }
 
+function apiUrl(path) {
+  return `${API_BASE}${path}`;
+}
+
+async function apiFetch(path, options = {}) {
+  try {
+    return await fetch(apiUrl(path), options);
+  } catch (error) {
+    if (window.location.protocol === "file:") {
+      throw new Error("The app server is not running. Please open CalendarAssistant.exe or the desktop shortcut, then try Review Files again.");
+    }
+    throw new Error(error.message || "The app could not connect to the local scanner.");
+  }
+}
+
 function renderSetupStatus(status) {
   if (!status) {
     setupStatusEl.textContent = "Google setup has not been checked yet.";
@@ -50,7 +66,7 @@ function renderSetupStatus(status) {
 
 async function loadSetupStatus() {
   try {
-    const response = await fetch("/api/setup-status");
+    const response = await apiFetch("/api/setup-status");
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not check Google setup.");
     renderSetupStatus(payload);
@@ -250,7 +266,7 @@ uploadForm.addEventListener("submit", async (event) => {
   [...fileInput.files].forEach((file) => formData.append("files", file));
   setStatus("Reviewing files...");
   try {
-    const response = await fetch("/api/upload", { method: "POST", body: formData });
+    const response = await apiFetch("/api/upload", { method: "POST", body: formData });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Upload failed.");
     renderCalendarStatus(null);
@@ -270,7 +286,7 @@ saveDraftButton.addEventListener("click", async () => {
     results: [],
   });
   try {
-    const response = await fetch("/api/save-draft", {
+    const response = await apiFetch("/api/save-draft", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events: currentEvents }),
@@ -303,7 +319,7 @@ searchDuplicatesButton.addEventListener("click", async () => {
   }
   setStatus("Searching Google Calendar for similar events. You may need to sign in.");
   try {
-    const response = await fetch("/api/search-duplicates", {
+    const response = await apiFetch("/api/search-duplicates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events: currentEvents, start_date: startDate, end_date: endDate }),
@@ -346,7 +362,7 @@ setupForm.addEventListener("submit", async (event) => {
   formData.append("credentials", credentialsInput.files[0]);
   setStatus("Saving Google credentials...");
   try {
-    const response = await fetch("/api/setup-credentials", { method: "POST", body: formData });
+    const response = await apiFetch("/api/setup-credentials", { method: "POST", body: formData });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not save Google credentials.");
     renderSetupStatus(payload);
@@ -360,7 +376,7 @@ setupForm.addEventListener("submit", async (event) => {
 signOutGoogleButton.addEventListener("click", async () => {
   setStatus("Clearing saved Google sign-in...");
   try {
-    const response = await fetch("/api/sign-out-google", { method: "POST" });
+    const response = await apiFetch("/api/sign-out-google", { method: "POST" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not clear Google sign-in.");
     renderSetupStatus(payload);
@@ -371,8 +387,15 @@ signOutGoogleButton.addEventListener("click", async () => {
 });
 
 async function loadDrafts() {
-  const response = await fetch("/api/drafts");
-  const payload = await response.json();
+  let payload;
+  try {
+    const response = await apiFetch("/api/drafts");
+    payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not refresh drafts.");
+  } catch (error) {
+    draftsEl.textContent = error.message;
+    return;
+  }
   const drafts = payload.drafts || [];
   if (!drafts.length) {
     draftsEl.textContent = "No JSON drafts saved yet.";
@@ -392,5 +415,8 @@ async function loadDrafts() {
 }
 
 refreshDraftsButton.addEventListener("click", loadDrafts);
+if (window.location.protocol === "file:") {
+  setStatus("This page was opened directly. Scanning works only while CalendarAssistant.exe or the desktop shortcut is running.", "warn");
+}
 loadSetupStatus();
 loadDrafts();

@@ -12,6 +12,7 @@ This package contains a Windows standalone build of Calendar Assistant.
 ## First-time Google setup
 
 Use the Google Setup box in the browser to select your own OAuth desktop `credentials.json`.
+Create it here: https://console.cloud.google.com/apis/credentials/oauthclient
 
 The first Google Calendar search or save will open Google sign-in. After sign-in, the app stores `token.json` next to the `.exe` for that user's account.
 

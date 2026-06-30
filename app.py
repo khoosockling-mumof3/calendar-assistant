@@ -141,16 +141,17 @@ def read_image_text(path):
         result = subprocess.run(
             [tesseract, str(path), "stdout", "-l", "eng"],
             capture_output=True,
-            text=True,
             timeout=60,
             check=False,
             env=env,
         )
     except Exception as exc:
         return "", f"Image OCR could not run: {exc}"
+    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
     if result.returncode != 0:
-        return "", normalize_spaces(result.stderr) or "Image OCR did not return readable text."
-    return result.stdout.strip(), ""
+        return "", normalize_spaces(stderr) or "Image OCR did not return readable text."
+    return stdout.strip(), ""
 
 
 def classify_change_type(text):
@@ -839,6 +840,16 @@ class CalendarAssistantHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.end_headers()
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path in {"/", "/index.html"}:
@@ -1002,8 +1013,10 @@ class CalendarAssistantHandler(BaseHTTPRequestHandler):
 def main():
     ensure_dirs()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), CalendarAssistantHandler)
-    print(f"Calendar Assistant is running at http://127.0.0.1:{PORT}")
+    app_url = f"http://127.0.0.1:{PORT}"
+    print(f"Calendar Assistant is running at {app_url}")
     print("Press Ctrl+C in this window when you are done.")
+    threading.Timer(0.8, lambda: webbrowser.open(app_url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

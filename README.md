@@ -30,6 +30,8 @@ After downloading:
 
 Each user must provide their own Google OAuth desktop credentials. The app stores that file locally as `credentials.json` beside the app, then creates a local `token.json` after Google sign-in.
 
+Create OAuth desktop credentials here: https://console.cloud.google.com/apis/credentials/oauthclient
+
 Do not share:
 
 - `credentials.json`

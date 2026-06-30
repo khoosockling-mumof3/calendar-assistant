@@ -116,6 +116,16 @@ h2 {
   margin-bottom: 0;
 }
 
+.setup-help {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.setup-help a {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .setup-form {
   display: flex;
   flex-wrap: wrap;

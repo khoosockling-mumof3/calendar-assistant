@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calendar Assistant</title>
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <main class="app-shell">
     <section class="top-bar">
       <div>
         <h1>Calendar Assistant</h1>
-        <p>Review PDFs, screenshots, and images, then save draft calendar events as JSON.</p>
+        <p>Extract calendar events from PDFs, screenshots, and images, review the details, check for duplicates, and sync approved events to Google Calendar.</p>
       </div>
       <button id="refreshDrafts" type="button">Refresh Drafts</button>
     </section>
@@ -21,6 +21,11 @@
         <div>
           <h2>Google Setup</h2>
           <p id="setupStatus">Checking Google setup...</p>
+          <p class="setup-help">
+            Need credentials?
+            <a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noreferrer">Create a Google OAuth desktop client</a>
+            and download it as <strong>credentials.json</strong>.
+          </p>
         </div>
         <form id="setupForm" class="setup-form">
           <input id="credentialsInput" name="credentials" type="file" accept=".json,application/json">
@@ -67,6 +72,6 @@
       <div id="drafts" class="draft-list"></div>
     </section>
   </main>
-  <script src="/assets/app.js?v=20260630-shareable-setup"></script>
+  <script src="assets/app.js?v=20260630-scan-fix"></script>
 </body>
 </html>
