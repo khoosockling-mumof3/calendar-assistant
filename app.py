@@ -93,6 +93,14 @@ EVENT_WORDS = re.compile(
     r"orientation|conference|cancelled|canceled|rescheduled|postponed)\b",
     re.IGNORECASE,
 )
+KNOWN_TITLE_PATTERNS = [
+    (re.compile(r"\bStaff\s+Training\s+Day\s+Half-?Day\s+Centre\s+Closure\b", re.IGNORECASE), "Staff Training Day Half-Day Centre Closure"),
+    (re.compile(r"\bStaff\s+Wellness\s+Day\s+Centre\s+(?:Closure|Gosure)\b", re.IGNORECASE), "Staff Wellness Day Centre Closure"),
+    (re.compile(r"\bHari\s+Raya\s+Puasa\b", re.IGNORECASE), "Hari Raya Puasa"),
+    (re.compile(r"\bChristmas\s+Day\b", re.IGNORECASE), "Christmas Day"),
+    (re.compile(r"\bVesak\s+Day\b", re.IGNORECASE), "Vesak Day"),
+    (re.compile(r"\bDeepavali?\s*(?:\(Observed\))?\b", re.IGNORECASE), "Deepavali (Observed)"),
+]
 
 
 def ensure_dirs():
@@ -298,17 +306,51 @@ def title_from_row(text):
     return line[:120]
 
 
+def clean_event_title(candidate, text):
+    combined = normalize_spaces(f"{candidate} {text}")
+    for pattern, title in KNOWN_TITLE_PATTERNS:
+        if pattern.search(combined):
+            return title
+
+    title = normalize_spaces(candidate)
+    title = re.sub(r"[^\w\s()&/.,:'+-]", " ", title, flags=re.UNICODE)
+    title = normalize_spaces(title)
+    title = re.sub(r"\b(?:Gazetted|Public|Holiday)\b", " ", title, flags=re.IGNORECASE)
+    title = re.sub(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\b", " ", title, flags=re.IGNORECASE)
+    for pattern in DATE_PATTERNS:
+        title = pattern.sub(" ", title)
+    title = normalize_spaces(title.strip(" :-*,?"))
+
+    if re.search(r"\bSchool\s+Closure\b", title, re.IGNORECASE):
+        return "School Closure"
+    if re.search(r"\bCentre\s+(?:Closure|Close|Gosure)\b", title, re.IGNORECASE):
+        return re.sub(r"\b(?:Gosure|Close)\b", "Closure", title, flags=re.IGNORECASE)[:120]
+    if re.search(r"\bGazetted\s+Public\s+Holiday\b", text, re.IGNORECASE) and not EVENT_WORDS.search(title):
+        return "Public Holiday"
+
+    words = re.findall(r"[A-Za-z]{2,}", title)
+    has_real_signal = EVENT_WORDS.search(title) or any(word[:1].isupper() for word in words)
+    if len(words) < 2 or not has_real_signal:
+        if re.search(r"\bGazetted\s+Public\s+Holiday\b", text, re.IGNORECASE):
+            return "Public Holiday"
+        return ""
+    return title[:120]
+
+
 def extract_title(text, filename):
     lines = [normalize_spaces(line) for line in text.splitlines() if normalize_spaces(line)]
     ignored = ("date", "time", "location", "where", "venue", "description", "when")
     if len(lines) == 1 and has_date(lines[0]):
         row_title = title_from_row(lines[0])
-        if row_title:
-            return row_title
+        clean_title = clean_event_title(row_title, lines[0])
+        if clean_title:
+            return clean_title
     for line in lines[:8]:
         lower = line.lower().strip(":")
         if len(line) >= 3 and not any(lower.startswith(word) for word in ignored):
-            return line[:120]
+            clean_title = clean_event_title(line[:120], text)
+            if clean_title:
+                return clean_title
     return Path(filename).stem.replace("_", " ").replace("-", " ").strip().title()
 
 
