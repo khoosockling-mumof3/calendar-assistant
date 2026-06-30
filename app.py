@@ -113,8 +113,20 @@ def safe_filename(name):
     return cleaned or "uploaded-file"
 
 
+def clean_ocr_text(value):
+    text = str(value or "")
+    replacements = [
+        (r"\bGosure\b", "Closure"),
+        (r"\bCiosure\b", "Closure"),
+        (r"\bClos(?:e|urc)\b", "Closure"),
+    ]
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def normalize_spaces(value):
-    return re.sub(r"\s+", " ", value or "").strip()
+    return re.sub(r"\s+", " ", clean_ocr_text(value)).strip()
 
 
 def normalize_ocr_date_text(value):
